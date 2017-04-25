@@ -601,7 +601,7 @@ class Tokenizer {
         }
 
         if (selectors[0].charAt(0) === '@') {
-            result.atRule = selectors[0].split(/\s+/, 1)[0].slice(1).toLowerCase();
+            result.atRule = selectors[0].split(/\s+/, 1)[0].slice(1);
             selectors[0] = selectors[0].slice(1 + result.atRule.length).trim();
             result.atValues = selectors;
         } else {
@@ -708,7 +708,7 @@ class Tokenizer {
 
         result = {
             token: 'rule',
-            key: key.toLowerCase(),
+            key: key,
             value: value,
             index: words[0].index
         };

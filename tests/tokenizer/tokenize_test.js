@@ -89,7 +89,7 @@
                 index: 0
             }, {
                 token: 'rule',
-                key: 'color',
+                key: 'Color',
                 value: 'Red',
                 index: 3
             }, {
