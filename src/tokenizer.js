@@ -88,6 +88,7 @@ class Tokenizer {
         if (this.lessSyntax) {
             validTokens.push('(');
             validTokens.push(')');
+            validTokens.push('//');
         }
 
         this._findTokens(validTokens).forEach(token => {
