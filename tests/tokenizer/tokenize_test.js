@@ -678,6 +678,21 @@
             }`);
             expect(parser.errors.length).to.be.equal(1);
             parser.errors[0].getMessage().should.be.equal('Incomplete URL on line 2');
+
+            // More than one double colon
+            parser = new Tokenizer({
+                ignoreErrors: false,
+                splitRules: true
+            });
+            parser.tokenize('.foo { color: red: blue; }');
+            expect(parser.errors.length).to.be.equal(1);
+
+            parser = new Tokenizer({
+                ignoreErrors: false,
+                splitRules: true
+            });
+            parser.tokenize('.foo { color: url("bar"): blue; }');
+            expect(parser.errors.length).to.be.equal(1);
         });
     });
 })();

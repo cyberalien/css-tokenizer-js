@@ -79,6 +79,7 @@ class Tokenizer {
             items = [],
             depth = 0,
             functionDepth = 0,
+            expressionDepth = 0,
             blockStart = 0,
             selectorStart = 0,
             error = false, // used to track invalid items
@@ -86,9 +87,7 @@ class Tokenizer {
 
         let validTokens = ['"', "'", '/*', '{', '}', ';', 'url(', '\\'];
         if (this.lessSyntax) {
-            validTokens.push('(');
-            validTokens.push(')');
-            validTokens.push('//');
+            validTokens = validTokens.concat(['(', ')', '//', '@{', '#{']);
         }
 
         this._findTokens(validTokens).forEach(token => {
@@ -280,6 +279,51 @@ class Tokenizer {
                     break;
 
                 case '}':
+                    if (expressionDepth > 0) {
+                        // LESS/SASS expression
+                        if (expressionDepth === 1 && this.splitRules) {
+                            // Find start of expression
+                            let found = false,
+                                text = this._css.slice(start, token.index + 1);
+
+                            for (let i = words.length - 1; i >= 0; i --) {
+                                if (words[i].beforeExpression) {
+                                    found = true;
+                                    delete words[i].beforeExpression;
+                                    if (i === words.length - 1) {
+                                        // Previous token starts expression - do not change word tokens
+                                        words.push({
+                                            type: 'expression',
+                                            text: text,
+                                            index: start
+                                        });
+                                    } else {
+                                        // Merge with previous tokens
+                                        start = words[i + 1].index;
+                                        words = words.slice(0, i + 1);
+                                        words.push({
+                                            type: 'expression',
+                                            text: text,
+                                            index: start
+                                        });
+                                    }
+                                    break;
+                                }
+                                text = words[i].text + text;
+                            }
+                            if (!found) {
+                                words.push({
+                                    type: 'expression',
+                                    text: text,
+                                    index: start,
+                                    error: true
+                                });
+                            }
+                            start = token.index + 1;
+                        }
+                        expressionDepth --;
+                        break;
+                    }
                     // End of block
                     if (this.splitRules) {
                         words.push({
@@ -324,12 +368,15 @@ class Tokenizer {
                 case '(':
                     // Function with LESS syntax enabled
                     if (this.splitRules) {
-                        words.push({
+                        let row = {
                             type: 'text',
                             text: this._css.slice(start, token.index),
-                            index: start,
-                            beforeFunction: true
-                        });
+                            index: start
+                        };
+                        if (!functionDepth) {
+                            row.beforeFunction = true;
+                        }
+                        words.push(row);
                         start = token.index;
                     }
                     functionDepth ++;
@@ -337,7 +384,7 @@ class Tokenizer {
 
                 case ')':
                     // End of function with LESS syntax enabled
-                    if (functionDepth > 0 && this.splitRules) {
+                    if (functionDepth === 1 && this.splitRules) {
                         // Find start of function
                         let found = false,
                             text = this._css.slice(start, token.index + 1);
@@ -381,6 +428,24 @@ class Tokenizer {
                     if (functionDepth < 0) {
                         functionDepth = 0;
                     }
+                    break;
+
+                case '@{':
+                case '#{':
+                    // Expression with LESS/SASS syntax enabled
+                    if (this.splitRules) {
+                        let row = {
+                            type: 'text',
+                            text: this._css.slice(start, token.index + 2),
+                            index: start,
+                        };
+                        if (!expressionDepth) {
+                            row.beforeExpression = true;
+                        }
+                        words.push(row);
+                        start = token.index + 2;
+                    }
+                    expressionDepth ++;
                     break;
             }
         });
@@ -654,7 +719,7 @@ class Tokenizer {
             value = '',
             isKey = true,
             error = false,
-            possibleMixin = false,
+            hasFunction = false,
             result;
 
         words.forEach(word => {
@@ -664,12 +729,17 @@ class Tokenizer {
 
             if (word.type !== 'text') {
                 if (isKey) {
-                    if (word.type === 'function') {
-                        possibleMixin = true;
+                    if (!this.lessSyntax) {
+                        // Cannot have URL or quoted string in key
+                        error = true;
                         return;
                     }
-                    // Cannot have URL or quoted string in key
-                    error = true;
+
+                    // Check for function
+                    if (word.type === 'function') {
+                        hasFunction = true;
+                    }
+                    key += word.text;
                     return;
                 }
                 value += word.text;
@@ -677,6 +747,17 @@ class Tokenizer {
             }
 
             let pairs = word.text.split(':');
+            if (this.lessSyntax && pairs.length > 1) {
+                // Check for "&:extend" LESS syntax
+                pairs.forEach((item, index) => {
+                    if (index > 0 && (item === 'extend' || item.slice(0, 7) === 'extend(')) {
+                        pairs[index - 1] += ':' + pairs[index];
+                        pairs[index] = null;
+                    }
+                });
+                pairs = pairs.filter(item => item !== null);
+            }
+
             if (pairs.length > 2) {
                 error = true;
                 return;
@@ -698,9 +779,14 @@ class Tokenizer {
             }
         });
 
-        if (error || isKey) {
-            return possibleMixin;
+        if (error) {
+            return false;
         }
+        if (isKey) {
+            // True if token should be treated as code
+            return this.lessSyntax ? hasFunction || key.trim().slice(0, 1) === '@' : false;
+        }
+
         key = key.trim();
         value = value.trim();
         if (!key.length || !value.length) {
